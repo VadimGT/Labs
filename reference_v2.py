@@ -139,21 +139,32 @@ def find_best_matches(
 
         src_norm = normalize(source_val)
 
+        # Пустые/бессмысленные значения (например, "," или пробелы) не матчим —
+        # иначе rapidfuzz даст им высокий score на любом кандидате.
+        if not re.sub(r'[^\wа-яё]', '', src_norm):
+            row = {
+                'source_value': source_val, 'best_match': '', 'match_found': 'no',
+                'score': 0.0, 'levenshtein_distance': None, 'fuzzy_ratio': None,
+                'jaccard_words': None, 'alternatives': '',
+            }
+            cache[source_val] = row
+            results.append(dict(row))
+            continue
+
         # Быстрый предварительный отбор (C++ внутри rapidfuzz): берём ~K
         # ближайших кандидатов по WRatio, точный скоринг считаем только по ним.
+        # extract возвращает [(choice, score, index), ...]; индексы позволяют
+        # вернуться к оригинальному написанию справочника.
         k = min(len(refs), max(10, top_n * 4))
         prefilter = process.extract(
             src_norm,
-            [(i, n) for i, n in enumerate(ref_norms)],
+            ref_norms,
             scorer=fuzz.WRatio,
-            processor=lambda x: x[1],
-            key=lambda x: x[0],
             limit=k,
-            score_cutoff=0.0,
         )
 
         scored = []
-        for _, (idx, _norm), _wscore in prefilter:
+        for _choice, _wscore, idx in prefilter:
             entry = refs[idx]
             lev, ratio, jac = score_pair(src_norm, entry.norm)
             # Composite score: взвешенная сумма метрик (0..1).
